@@ -5,7 +5,6 @@ import http from 'http';
 
 const app = express();
 const server = http.createServer(app);
-
 const wss = new WebSocketServer({server});
 
 const rooms={};
@@ -26,17 +25,25 @@ wss.on('connection',(ws,req)=>{
                 ws.isDrawer=false;
                 ws.username=data.username;
                 rooms[roomId].scores[ws.username]=0;
+                console.log(rooms);
+                
                 ws.send(JSON.stringify({type:"roomCreated",roomId,message:"Room Created"+ws.username}));
+
                 break;
             case 'join':
                 const room = rooms[data.roomId];
+                console.log("Joining data",data);
+                console.log(rooms);
+                
                 if(room){
                     room.players.push(ws);
                     ws.roomId = data.roomId;
                     ws.isDrawer = false;
                     ws.username=data.username;
                     room.scores[ws.username]=0;
-                    ws.send(JSON.stringify({type:"joined",roomId:data.roomId}));
+                    broadcast(ws.roomId,{type:"user_joined",message:`${data.username} joined to the room`,players:getPlayers(room)})
+                    ws.send(JSON.stringify({type:"joined",roomId:data.roomId,players:getPlayers(room)}));
+
                 }else{
                     ws.send(JSON.stringify({type:"error",message:"Room not found"}))
                 }
@@ -58,13 +65,23 @@ wss.on('connection',(ws,req)=>{
                 handleChat(ws,data.message);
                 break;
 
-            default:ws.send({type:"waiting to get the response"})
+            case "leave":leaveRoom(ws)
+                break;
+
+            case 'get_players':
+                broadcastPlayerList(ws.roomId)
+                break;
+
+            default:
+                ws.send({type:"waiting to get the response"})
         }
     })
 
     ws.on('close',()=>{
+        console.log("Closing the web socket");
+        
         if(ws.roomId && rooms[ws.roomId]){
-            rooms[ws.roomsId].players=rooms[ws.roomsId].players.filter(client=>client!==ws);
+            rooms[ws.roomId].players=rooms[ws.roomId].players.filter(client=>client!==ws);
             if(rooms[ws.roomId].players.length===0){
                 delete rooms[ws.roomId];
             }
@@ -82,6 +99,37 @@ function broadcast(roomId,message){
     });
 }
 
+function leaveRoom(ws){
+    for (const roomId in rooms){
+        const room = rooms[roomId];
+
+        const index = rooms.players.indexOf(ws);
+        if(index!==-1){
+            room.players.splice(index,1);
+            delete room.scores[ws.username];
+            if(room.players.length===0){
+                delete rooms[roomId]
+            }else{
+                broadcastPlayerList(roomId)
+            }
+            break;
+        }
+
+    }
+
+}
+
+function getPlayers(room){
+    return room.players.map(player=>player.username)
+
+}
+function broadcastPlayerList(roomId){
+
+    const room = rooms[roomId];
+    const playerList = getPlayers(room);
+    broadcast(roomId,{type:"player_list",players:playerList})
+
+}
 function startGame(roomId){
     const room = rooms[roomId];
     room.drawer = room.players[0];
